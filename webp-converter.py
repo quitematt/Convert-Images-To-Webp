@@ -32,6 +32,7 @@ def convert_image(image_path, image_quality, output_folder):
     # If the file is already a .webp, just copy it
     if image_path.suffix.lower() == ".webp":
         shutil.copy(image_path, output_file)
+        logging.info(f"{image_path.name}: Already WebP. Copied to output directory.")
         return (image_path, True) # Success tuple for copy operation
     
     try:
@@ -41,9 +42,10 @@ def convert_image(image_path, image_quality, output_folder):
             stderr=subprocess.DEVNULL,
             check=True
         )
+        logging.info(f"{image_path.name}: Converted to WebP")
         return (image_path, True) # Success tuple
     except subprocess.CalledProcessError as e:
-        logging.error(f"Conversion failed for {image_path}: {e}")
+        logging.error(f"Conversion failed for {image_path.name}: {e}")
         return (image_path, False) # Failure tuple
 
 
