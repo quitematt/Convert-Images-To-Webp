@@ -1,56 +1,77 @@
-import os
+import shutil
 import subprocess
-import sys
+import argparse
+from pathlib import Path
 from multiprocessing import Pool, cpu_count
+import logging
 
-out_dir = "output_files"
-input_dir = "./input_files"
-extensions = (".png", ".jpg", ".jpeg", ".tiff", ".webp")
-script_dir = os.path.dirname(os.path.realpath(__file__))
-libwebp = os.path.join(script_dir, "libwebp", "libwebp-1.5.0-windows-x64", "bin", "cwebp.exe")
 
-def find_image_paths():
-    """Finds image file paths in the input directory."""
-    images = []
-    for root, _, files in os.walk(input_dir):
-        for file in files:
-            if file.lower().endswith(extensions):
-                images.append(os.path.join(root, file))
-    return images
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("image_conversion.log"),
+        logging.StreamHandler()
+    ]
+)
 
-def convert_image(image_path, quality):
-    """Converts a single image to WebP format."""
-    output_file = os.path.join(out_dir, os.path.splitext(os.path.basename(image_path))[0] + ".webp")
+extensions = (".png", ".jpg", ".jpeg", ".tiff", ".webp") # Add in additional extensions here if needed
+script_dir = Path(__file__).resolve().parent
+libwebp = script_dir / "libwebp" / "libwebp-1.5.0-windows-x64" / "bin" / "cwebp.exe"
+
+
+def find_image_paths(input_folder):
+    return [file for file in input_folder.rglob("*") if file.suffix.lower() in extensions]
+
+
+# Convert single image
+def convert_image(image_path, image_quality, output_folder):
+    output_file = output_folder / image_path.with_suffix(".webp").name
+
+    # If the file is already a .webp, just copy it
+    if image_path.suffix.lower() == ".webp":
+        shutil.copy(image_path, output_file)
+        return (image_path, True) # Success tuple for copy operation
+    
     try:
         result = subprocess.run(
-            [libwebp, "-quiet", "-q", str(quality), image_path, "-o", output_file],
+            [libwebp, "-quiet", "-q", str(image_quality), image_path, "-o", output_file],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=True
         )
-        return (image_path, True)  # Success
-    except subprocess.CalledProcessError:
-        return (image_path, False)  # Failure
+        return (image_path, True) # Success tuple
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Conversion failed for {image_path}: {e}")
+        return (image_path, False) # Failure tuple
 
-def convert_all(quality):
-    """Parallelizes image conversion."""
-    images = find_image_paths()
+
+def convert_all(input_folder, image_quality):
+    images = find_image_paths(input_folder)
     
-    if not os.path.exists(out_dir):
-        os.makedirs(out_dir)
+    output_folder = input_folder.parent / f"{input_folder.name}_webp"
+    output_folder.mkdir(parents=True, exist_ok=True)
+
+    logging.info(f"Starting conversion of {len(images)} images.")
 
     with Pool(processes=cpu_count()) as pool:
-        results = pool.starmap(convert_image, [(img, quality) for img in images])
+        results = pool.starmap(convert_image, [(img, image_quality, output_folder) for img in images])
 
     failed_images = [img for img, success in results if not success]
-    
-    print(f"Converted {len(images) - len(failed_images)} image(s) to WebP format.")
+
+    logging.info(f"Converted {len(images) - len(failed_images)} image(s) to WebP format.")
     
     if failed_images:
-        print(f"Failed to convert {len(failed_images)} image(s):")
+        logging.error(f"Failed to convert {len(failed_images)} image(s):")
         for fail in failed_images:
-            print(f"- {fail}")
+            logging.error(f"- {fail}")
+
 
 if __name__ == "__main__":
-    quality = sys.argv[1] if len(sys.argv) > 1 else "80"
-    convert_all(quality)
+    parser = argparse.ArgumentParser(description="Convert all images in a folder to WebP.")
+    parser.add_argument("input_folder", type=Path, help="Path to the input folder containing the files.")
+    parser.add_argument("--image-quality", type=int, help="Image compression quality percentage.", default=80)
+    
+    args = parser.parse_args()
+    convert_all(args.input_folder, args.image_quality)
